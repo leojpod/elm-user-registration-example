@@ -1,15 +1,20 @@
-module Main exposing (main)
+port module Main exposing (main)
 
 import Browser
+import FontAwesome as Icon
 import Html exposing (Html, div, fieldset, form, h1, nav, span, text)
-import Html.Attributes exposing (class)
+import Html.Attributes exposing (class, disabled)
 import Html.Attributes.Extra
-import Html.Events exposing (onClick, onSubmit)
+import Html.Events
+import Html.Events.Extra
 import Html.Extra
-import Http
+import Json.Encode
+import Json.Encode.Extra
 import Maybe.Extra
+import Process
 import RemoteData exposing (RemoteData)
 import Result.Extra
+import Task
 import Validate exposing (Valid, Validator)
 
 
@@ -74,6 +79,16 @@ customerValidator =
         [ Validate.ifInvalidEmail .email (\invalidEmail -> ( CustomerEmail invalidEmail, "Invalid Email" ))
         , Validate.ifFalse (.firstName >> String.all Char.isAlpha) ( FirstName "", "Only letters allowed (a-z and A-Z)" )
         , Validate.ifFalse (.lastName >> String.all Char.isAlpha) ( FirstName "", "Only letters allowed (a-z and A-Z)" )
+        ]
+
+
+encodeCustomer : Customer -> Json.Encode.Value
+encodeCustomer { email, firstName, lastName } =
+    Json.Encode.object
+        [ ( "type", Json.Encode.string "Customer" )
+        , ( "email", Json.Encode.string email )
+        , ( "firstName", Json.Encode.string firstName )
+        , ( "lastName", Json.Encode.string lastName )
         ]
 
 
@@ -162,6 +177,18 @@ vendorValidator =
             [ Validate.ifTrue (.productQuantity >> (==) (Err "")) ( ProductQuantity "", "Required" )
             , Validate.ifTrue (.productQuantity >> Result.Extra.isErr) ( ProductQuantity "", "Invalid Quantity" )
             ]
+        ]
+
+
+encodeVendor : Vendor -> Json.Encode.Value
+encodeVendor { email, companyName, productName, productPrice, productQuantity } =
+    Json.Encode.object
+        [ ( "type", Json.Encode.string "Vendor" )
+        , ( "email", Json.Encode.string email )
+        , ( "companyName", Json.Encode.string companyName )
+        , ( "productName", Json.Encode.string productName )
+        , ( "productPrice", Json.Encode.Extra.maybe Json.Encode.float <| Result.toMaybe productPrice )
+        , ( "productQuantity", Json.Encode.Extra.maybe Json.Encode.int <| Result.toMaybe productQuantity )
         ]
 
 
@@ -257,9 +284,11 @@ type alias Model =
     }
 
 
-type Error
+type
+    Error
+    -- NOTE we'll add something like that in due time
+    -- | HttpError Http.Error
     = ValidationError
-    | HttpError Http.Error
 
 
 defaultModel : UserType -> Model
@@ -291,6 +320,7 @@ type Msg
     | SubmitCustomer (Valid Customer)
     | SubmitVendor (Valid Vendor)
     | UserCreationUpdate (RemoteData Error ())
+    | Reset
 
 
 update : Msg -> Model -> ( Model, Cmd Msg )
@@ -337,14 +367,47 @@ update msg model =
                     -- NOTE this should never happen by construction
                     ( model, Cmd.none )
 
-        SubmitCustomer _ ->
-            Debug.todo "handle submit"
+        SubmitCustomer validCustomer ->
+            ( { model | request = RemoteData.Loading }
+            , Cmd.batch
+                [ exportCustomer validCustomer
+                , Process.sleep 1000
+                    |> Task.perform (\_ -> UserCreationUpdate <| RemoteData.Success ())
+                ]
+            )
 
-        SubmitVendor _ ->
-            Debug.todo "handle submit"
+        SubmitVendor validVendor ->
+            ( { model | request = RemoteData.Loading }
+            , Cmd.batch
+                [ exportVendor validVendor
+                , Process.sleep 1000
+                    |> Task.perform (\_ -> UserCreationUpdate <| RemoteData.Success ())
+                ]
+            )
 
         UserCreationUpdate newRequest ->
             ( { model | request = newRequest }, Cmd.none )
+
+        Reset ->
+            case model.userForm of
+                Customer_ _ ->
+                    ( defaultModel CustomerUser, Cmd.none )
+
+                Vendor_ _ ->
+                    ( defaultModel VendorUser, Cmd.none )
+
+
+exportCustomer : Valid Customer -> Cmd msg
+exportCustomer =
+    Validate.fromValid >> encodeCustomer >> exportForm
+
+
+exportVendor : Valid Vendor -> Cmd msg
+exportVendor =
+    Validate.fromValid >> encodeVendor >> exportForm
+
+
+port exportForm : Json.Encode.Value -> Cmd msg
 
 
 subscriptions : Model -> Sub Msg
@@ -396,7 +459,8 @@ view { userForm, request } =
               in
               form
                 [ class "flex flex-col w-full p-4 space-y-8"
-                , onSubmit submitFormAction
+
+                -- , onSubmit submitFormAction
                 ]
                 [ case userForm of
                     Customer_ customer ->
@@ -406,6 +470,26 @@ view { userForm, request } =
                         vendorform request vendor
                 , div [ class "flex flex-row justify-end" ] [ button { msg = Just submitFormAction, style = submitStyle } [ text "Submit" ] ]
                 ]
+            , Html.Extra.viewIf (request == RemoteData.Loading) <|
+                modal
+                    [ class "flex flex-col items-center justify-between p-40"
+                    ]
+                    [ span [ class "text-blue-900" ] [ Icon.iconWithOptions Icon.spinner Icon.Solid [ Icon.Animation Icon.Spin, Icon.Size <| Icon.Mult 4 ] [ class "" ] ] ]
+            , Html.Extra.viewIf (RemoteData.isSuccess request) <|
+                modal
+                    [ class "flex flex-col items-center justify-between p-20 space-y-10" ]
+                    [ h1 [ class "text-3xl" ]
+                        [ text <|
+                            case userForm of
+                                Customer_ _ ->
+                                    "Customer created!"
+
+                                Vendor_ _ ->
+                                    "Vendor created!"
+                        ]
+                    , span [ class "text-green-700" ] [ Icon.iconWithOptions Icon.check Icon.Solid [ Icon.Size <| Icon.Mult 4 ] [] ]
+                    , button { msg = Just Reset, style = Primary } [ span [ class "px-20 text-2xl" ] [ text "Done" ] ]
+                    ]
             ]
         ]
     }
@@ -430,7 +514,10 @@ customerForm request ({ email, firstName, lastName } as customer) =
                         >> Maybe.map Tuple.second
                     )
     in
-    fieldset [ class "flex flex-col space-y-6" ]
+    fieldset
+        [ class "flex flex-col space-y-6"
+        , disabled <| RemoteData.isLoading request || RemoteData.isSuccess request
+        ]
         [ input
             { label = "Email"
             , feedback =
@@ -474,7 +561,10 @@ vendorform request ({ email, companyName, productName, productPrice, productQuan
                         >> Maybe.map Tuple.second
                     )
     in
-    fieldset [ class "flex flex-col space-y-6" ]
+    fieldset
+        [ class "flex flex-col space-y-6"
+        , disabled <| RemoteData.isLoading request || RemoteData.isSuccess request
+        ]
         [ input
             { label = "Email"
             , feedback = feedbackForField isVendorEmail
@@ -529,7 +619,7 @@ button { msg, style } =
                 Html.Attributes.Extra.empty
         , Maybe.Extra.unwrap
             Html.Attributes.Extra.empty
-            onClick
+            Html.Events.Extra.onClickPreventDefaultAndStopPropagation
             msg
         ]
 
@@ -548,4 +638,11 @@ input { label, feedback, value, onChange } =
             , Html.Attributes.value value
             ]
             []
+        ]
+
+
+modal : List (Html.Attribute Msg) -> List (Html Msg) -> Html Msg
+modal attrs content =
+    div [ class "fixed top-0 bottom-0 left-0 right-0 flex flex-col items-center justify-center bg-gray-700 bg-opacity-50" ]
+        [ div (class "w-full max-w-4xl bg-white border-blue-900 border-6" :: attrs) content
         ]

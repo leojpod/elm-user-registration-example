@@ -1,4 +1,7 @@
-import "./style.css";
-import { Elm } from "./elm/Main.elm";
+import './style.css'
+import { Elm } from './elm/Main.elm'
+import '@fortawesome/fontawesome-free/css/all.min.css'
 
-Elm.Main.init({ flags: {} });
+const app = Elm.Main.init({ flags: {} })
+
+app.ports.exportForm.subscribe(console.log)
