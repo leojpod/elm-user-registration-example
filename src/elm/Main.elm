@@ -5,9 +5,11 @@ import Html exposing (Html, div, fieldset, form, h1, nav, span, text)
 import Html.Attributes exposing (class)
 import Html.Attributes.Extra
 import Html.Events exposing (onClick)
+import Html.Extra
 import Maybe.Extra
 import RemoteData exposing (WebData)
-import Validate exposing (Valid)
+import Result.Extra
+import Validate exposing (Valid, Validator)
 
 
 main : Program Flags Model Msg
@@ -65,6 +67,15 @@ defaultCustomer =
     }
 
 
+customerValidator : Validator ( CustomerField, String ) Customer
+customerValidator =
+    Validate.all
+        [ Validate.ifInvalidEmail .email (\invalidEmail -> ( CustomerEmail invalidEmail, "Invalid Email" ))
+        , Validate.ifFalse (.firstName >> String.all Char.isAlpha) ( FirstName "", "Only letters allowed (a-z and A-Z)" )
+        , Validate.ifFalse (.lastName >> String.all Char.isAlpha) ( FirstName "", "Only letters allowed (a-z and A-Z)" )
+        ]
+
+
 updateCustomer : CustomerField -> Customer -> Customer
 updateCustomer field customer =
     case field of
@@ -84,12 +95,42 @@ type CustomerField
     | LastName String
 
 
+isCustomerEmail : CustomerField -> Bool
+isCustomerEmail field =
+    case field of
+        CustomerEmail _ ->
+            True
+
+        _ ->
+            False
+
+
+isFirstName : CustomerField -> Bool
+isFirstName field =
+    case field of
+        FirstName _ ->
+            True
+
+        _ ->
+            False
+
+
+isLastName : CustomerField -> Bool
+isLastName field =
+    case field of
+        LastName _ ->
+            True
+
+        _ ->
+            False
+
+
 type alias Vendor =
     { email : String
     , companyName : String
     , productName : String
-    , productPrice : Maybe Int
-    , productQuantity : Maybe Int
+    , productPrice : Result String Float
+    , productQuantity : Result String Int
     }
 
 
@@ -98,9 +139,29 @@ defaultVendor =
     { email = ""
     , companyName = ""
     , productName = ""
-    , productPrice = Nothing
-    , productQuantity = Nothing
+    , productPrice = Err ""
+    , productQuantity = Err ""
     }
+
+
+vendorValidator : Validator ( VendorField, String ) Vendor
+vendorValidator =
+    Validate.all
+        [ Validate.ifInvalidEmail .email (\invalidEmail -> ( VendorEmail invalidEmail, "Invalid Email" ))
+        , Validate.ifBlank .companyName ( CompanyName "", "Required" )
+        , Validate.firstError
+            [ Validate.ifBlank .productName ( ProductName "", "Required" )
+            , Validate.ifFalse (.productName >> String.all Char.isAlphaNum) ( ProductName "", "Only letters and numbers are allowed (a-z, A-Z and 0-9)" )
+            ]
+        , Validate.firstError
+            [ Validate.ifTrue (.productPrice >> (==) (Err "")) ( ProductPrice "", "Required" )
+            , Validate.ifTrue (.productPrice >> Result.Extra.isErr) ( ProductPrice "", "Invalid Price" )
+            ]
+        , Validate.firstError
+            [ Validate.ifTrue (.productQuantity >> (==) (Err "")) ( ProductQuantity "", "Required" )
+            , Validate.ifTrue (.productQuantity >> Result.Extra.isErr) ( ProductQuantity "", "Invalid Quantity" )
+            ]
+        ]
 
 
 updateVendor : VendorField -> Vendor -> Vendor
@@ -116,18 +177,68 @@ updateVendor field vendor =
             { vendor | productName = name }
 
         ProductPrice price ->
-            { vendor | productPrice = price }
+            { vendor | productPrice = price |> String.toFloat |> Result.fromMaybe price }
 
         ProductQuantity qte ->
-            { vendor | productQuantity = qte }
+            { vendor | productQuantity = qte |> String.toInt |> Result.fromMaybe qte }
 
 
 type VendorField
     = VendorEmail String
     | CompanyName String
     | ProductName String
-    | ProductPrice (Maybe Int)
-    | ProductQuantity (Maybe Int)
+    | ProductPrice String
+    | ProductQuantity String
+
+
+isVendorEmail : VendorField -> Bool
+isVendorEmail field =
+    case field of
+        VendorEmail _ ->
+            True
+
+        _ ->
+            False
+
+
+isCompanyName : VendorField -> Bool
+isCompanyName field =
+    case field of
+        CompanyName _ ->
+            True
+
+        _ ->
+            False
+
+
+isProductName : VendorField -> Bool
+isProductName field =
+    case field of
+        ProductName _ ->
+            True
+
+        _ ->
+            False
+
+
+isProductPrice : VendorField -> Bool
+isProductPrice field =
+    case field of
+        ProductPrice _ ->
+            True
+
+        _ ->
+            False
+
+
+isProductQuantity : VendorField -> Bool
+isProductQuantity field =
+    case field of
+        ProductQuantity _ ->
+            True
+
+        _ ->
+            False
 
 
 type alias Model =
@@ -260,20 +371,39 @@ view { userForm } =
 
 
 customerForm : Customer -> Html Msg
-customerForm { email, firstName, lastName } =
+customerForm ({ email, firstName, lastName } as customer) =
+    let
+        errors =
+            Validate.validate customerValidator customer
+                |> Result.Extra.error
+
+        feedbackForField test =
+            errors
+                |> Maybe.andThen
+                    (List.filter (Tuple.first >> test)
+                        >> List.head
+                        >> Maybe.map Tuple.second
+                    )
+    in
     fieldset [ class "flex flex-col space-y-6" ]
         [ input
             { label = "Email"
+            , feedback =
+                feedbackForField isCustomerEmail
             , value = email
             , onChange = SetCustomerField << CustomerEmail
             }
         , input
             { label = "First Name (Optional)"
+            , feedback =
+                feedbackForField isFirstName
             , value = firstName
             , onChange = SetCustomerField << FirstName
             }
         , input
             { label = "Last Name (Optional)"
+            , feedback =
+                feedbackForField isLastName
             , value = lastName
             , onChange = SetCustomerField << LastName
             }
@@ -281,32 +411,50 @@ customerForm { email, firstName, lastName } =
 
 
 vendorform : Vendor -> Html Msg
-vendorform { email, companyName, productName, productPrice, productQuantity } =
+vendorform ({ email, companyName, productName, productPrice, productQuantity } as vendor) =
+    let
+        errors =
+            Validate.validate vendorValidator vendor
+                |> Result.Extra.error
+
+        feedbackForField test =
+            errors
+                |> Maybe.andThen
+                    (List.filter (Tuple.first >> test)
+                        >> List.head
+                        >> Maybe.map Tuple.second
+                    )
+    in
     fieldset [ class "flex flex-col space-y-6" ]
         [ input
             { label = "Email"
+            , feedback = feedbackForField isVendorEmail
             , value = email
             , onChange = SetVendorField << VendorEmail
             }
         , input
             { label = "Company Name"
+            , feedback = feedbackForField isCompanyName
             , value = companyName
             , onChange = SetVendorField << CompanyName
             }
         , input
             { label = "Product Name"
+            , feedback = feedbackForField isProductName
             , value = productName
             , onChange = SetVendorField << ProductName
             }
         , input
             { label = "Product Price"
-            , value = Maybe.Extra.unwrap "" String.fromInt productPrice
-            , onChange = SetVendorField << ProductPrice << String.toInt
+            , feedback = feedbackForField isProductPrice
+            , value = Result.Extra.unpack identity String.fromFloat productPrice
+            , onChange = SetVendorField << ProductPrice
             }
         , input
             { label = "Product Quantity"
-            , value = Maybe.Extra.unwrap "" String.fromInt productQuantity
-            , onChange = SetVendorField << ProductQuantity << String.toInt
+            , feedback = feedbackForField isProductQuantity
+            , value = Result.Extra.unpack identity String.fromInt productQuantity
+            , onChange = SetVendorField << ProductQuantity
             }
         ]
 
@@ -345,12 +493,16 @@ button { msg, style } =
         )
 
 
-input : { label : String, value : String, onChange : String -> Msg } -> Html Msg
-input { label, value, onChange } =
+input : { label : String, feedback : Maybe String, value : String, onChange : String -> Msg } -> Html Msg
+input { label, feedback, value, onChange } =
     Html.label [ class "flex flex-col items-start" ]
-        [ span [] [ text label ]
+        [ div [ class "flex flex-row space-x-8" ]
+            [ span [] [ text label ]
+            , Html.Extra.viewMaybe (\feedbackMsg -> span [ class "text-red-700" ] [ text feedbackMsg ]) feedback
+            ]
         , Html.input
             [ class "w-full p-2 border-2 border-blue-800 rounded-sm"
+            , Html.Attributes.Extra.attributeMaybe (\_ -> class "border-red-700") feedback
             , Html.Events.onInput onChange
             , Html.Attributes.value value
             ]
