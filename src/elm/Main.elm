@@ -7,6 +7,7 @@ import Html.Attributes.Extra
 import Html.Events exposing (onClick)
 import Maybe.Extra
 import RemoteData exposing (WebData)
+import Validate exposing (Valid)
 
 
 main : Program Flags Model Msg
@@ -64,6 +65,19 @@ defaultCustomer =
     }
 
 
+updateCustomer : CustomerField -> Customer -> Customer
+updateCustomer field customer =
+    case field of
+        CustomerEmail email ->
+            { customer | email = email }
+
+        FirstName firstName ->
+            { customer | firstName = firstName }
+
+        LastName lastName ->
+            { customer | lastName = lastName }
+
+
 type CustomerField
     = CustomerEmail String
     | FirstName String
@@ -89,6 +103,25 @@ defaultVendor =
     }
 
 
+updateVendor : VendorField -> Vendor -> Vendor
+updateVendor field vendor =
+    case field of
+        VendorEmail email ->
+            { vendor | email = email }
+
+        CompanyName name ->
+            { vendor | companyName = name }
+
+        ProductName name ->
+            { vendor | productName = name }
+
+        ProductPrice price ->
+            { vendor | productPrice = price }
+
+        ProductQuantity qte ->
+            { vendor | productQuantity = qte }
+
+
 type VendorField
     = VendorEmail String
     | CompanyName String
@@ -103,9 +136,15 @@ type alias Model =
     }
 
 
-defaultModel : Model
-defaultModel =
-    { userForm = Customer_ defaultCustomer
+defaultModel : UserType -> Model
+defaultModel userType =
+    { userForm =
+        case userType of
+            CustomerUser ->
+                Customer_ defaultCustomer
+
+            VendorUser ->
+                Vendor_ defaultVendor
     , request = RemoteData.NotAsked
     }
 
@@ -116,7 +155,7 @@ type alias Flags =
 
 init : Flags -> ( Model, Cmd Msg )
 init _ =
-    ( defaultModel, Cmd.none )
+    ( defaultModel CustomerUser, Cmd.none )
 
 
 type Msg
@@ -124,13 +163,52 @@ type Msg
     | SetUserType UserType
     | SetCustomerField CustomerField
     | SetVendorField VendorField
-    | Submit
+    | Submit (Valid User)
     | UserCreationUpdate (WebData ())
 
 
 update : Msg -> Model -> ( Model, Cmd Msg )
 update msg model =
-    ( model, Cmd.none )
+    case msg of
+        NoOp ->
+            ( model, Cmd.none )
+
+        SetUserType userType ->
+            ( defaultModel userType, Cmd.none )
+
+        SetCustomerField customerField ->
+            case model.userForm of
+                Customer_ customer ->
+                    ( { model
+                        | userForm = Customer_ <| updateCustomer customerField customer
+                        , request = RemoteData.NotAsked
+                      }
+                    , Cmd.none
+                    )
+
+                Vendor_ _ ->
+                    -- NOTE this should never happen by construction
+                    ( model, Cmd.none )
+
+        SetVendorField vendorField ->
+            case model.userForm of
+                Vendor_ vendor ->
+                    ( { model
+                        | userForm = Vendor_ <| updateVendor vendorField vendor
+                        , request = RemoteData.NotAsked
+                      }
+                    , Cmd.none
+                    )
+
+                Customer_ _ ->
+                    -- NOTE this should never happen by construction
+                    ( model, Cmd.none )
+
+        Submit _ ->
+            Debug.todo "handle submit"
+
+        UserCreationUpdate newRequest ->
+            ( { model | request = newRequest }, Cmd.none )
 
 
 subscriptions : Model -> Sub Msg
