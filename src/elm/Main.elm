@@ -519,6 +519,7 @@ customerForm request ({ email, firstName, lastName } as customer) =
         ]
         [ input
             { label = "Email"
+            , addon = Just Icon.envelope
             , feedback =
                 feedbackForField isCustomerEmail
             , value = email
@@ -526,6 +527,7 @@ customerForm request ({ email, firstName, lastName } as customer) =
             }
         , input
             { label = "First Name (Optional)"
+            , addon = Nothing
             , feedback =
                 feedbackForField isFirstName
             , value = firstName
@@ -533,6 +535,7 @@ customerForm request ({ email, firstName, lastName } as customer) =
             }
         , input
             { label = "Last Name (Optional)"
+            , addon = Nothing
             , feedback =
                 feedbackForField isLastName
             , value = lastName
@@ -566,30 +569,35 @@ vendorform request ({ email, companyName, productName, productPrice, productQuan
         ]
         [ input
             { label = "Email"
+            , addon = Just Icon.envelope
             , feedback = feedbackForField isVendorEmail
             , value = email
             , onChange = SetVendorField << VendorEmail
             }
         , input
             { label = "Company Name"
+            , addon = Just Icon.globe
             , feedback = feedbackForField isCompanyName
             , value = companyName
             , onChange = SetVendorField << CompanyName
             }
         , input
             { label = "Product Name"
+            , addon = Nothing
             , feedback = feedbackForField isProductName
             , value = productName
             , onChange = SetVendorField << ProductName
             }
         , input
             { label = "Product Price"
+            , addon = Just Icon.dollarSign
             , feedback = feedbackForField isProductPrice
             , value = Result.Extra.unpack identity String.fromFloat productPrice
             , onChange = SetVendorField << ProductPrice
             }
         , input
             { label = "Product Quantity"
+            , addon = Nothing
             , feedback = feedbackForField isProductQuantity
             , value = Result.Extra.unpack identity String.fromInt productQuantity
             , onChange = SetVendorField << ProductQuantity
@@ -623,20 +631,23 @@ button { msg, style } =
         ]
 
 
-input : { label : String, feedback : Maybe String, value : String, onChange : String -> Msg } -> Html Msg
-input { label, feedback, value, onChange } =
+input : { label : String, addon : Maybe Icon.Icon, feedback : Maybe String, value : String, onChange : String -> Msg } -> Html Msg
+input { label, addon, feedback, value, onChange } =
     Html.label [ class "flex flex-col items-start" ]
         [ div [ class "flex flex-row space-x-8" ]
             [ span [] [ text label ]
             , Html.Extra.viewMaybe (\feedbackMsg -> span [ class "text-red-700" ] [ text feedbackMsg ]) feedback
             ]
-        , Html.input
-            [ class "w-full p-2 border-2 border-blue-800 rounded-sm"
-            , Html.Attributes.Extra.attributeMaybe (\_ -> class "border-red-700") feedback
-            , Html.Events.onInput onChange
-            , Html.Attributes.value value
+        , div [ class "flex flex-row items-baseline w-full border-2 border-blue-800 rounded-sm space-x-4 focus-within:shadow-outline" ]
+            [ Html.Extra.viewMaybe (\icon -> span [ class "px-2 text-blue-900 text-opacity-75" ] [ Icon.iconWithOptions icon Icon.Solid [ Icon.Size Icon.Large ] [] ]) addon
+            , Html.input
+                [ class "w-full p-2 rounded-sm focus:outline-none"
+                , Html.Attributes.Extra.attributeMaybe (\_ -> class "border-red-700") feedback
+                , Html.Events.onInput onChange
+                , Html.Attributes.value value
+                ]
+                []
             ]
-            []
         ]
 
 

@@ -22,7 +22,7 @@
   "dependencies": {
     "@fortawesome/fontawesome-free": "^5.15.1",
     "nodemon": "^2.0.4",
-    "tailwindcss": "^1.6.2"
+    "tailwindcss": "^1.8.11"
   },
   "devDependencies": {
     "@typescript-eslint/eslint-plugin": "^3.9.0",
