@@ -431,7 +431,7 @@ view { userForm, request } =
                         else
                             Secondary
                     }
-                    [ text "Customer" ]
+                    [ div [ class "w-32" ] [ text "Customer" ] ]
                 , button
                     { msg = Just <| SetUserType VendorUser
                     , style =
@@ -441,8 +441,7 @@ view { userForm, request } =
                         else
                             Secondary
                     }
-                    [ text "Vendor"
-                    ]
+                    [ div [ class "w-32" ] [ text "Vendor" ] ]
                 ]
             , let
                 ( submitFormAction, submitStyle ) =
@@ -468,7 +467,7 @@ view { userForm, request } =
 
                     Vendor_ vendor ->
                         vendorform request vendor
-                , div [ class "flex flex-row justify-end" ] [ button { msg = Just submitFormAction, style = submitStyle } [ text "Submit" ] ]
+                , div [ class "flex flex-row justify-end" ] [ button { msg = Just submitFormAction, style = submitStyle } [ div [ class "w-32" ] [ text "Submit" ] ] ]
                 ]
             , Html.Extra.viewIf (request == RemoteData.Loading) <|
                 modal
