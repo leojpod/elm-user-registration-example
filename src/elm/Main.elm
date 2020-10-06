@@ -4,10 +4,11 @@ import Browser
 import Html exposing (Html, div, fieldset, form, h1, nav, span, text)
 import Html.Attributes exposing (class)
 import Html.Attributes.Extra
-import Html.Events exposing (onClick)
+import Html.Events exposing (onClick, onSubmit)
 import Html.Extra
+import Http
 import Maybe.Extra
-import RemoteData exposing (WebData)
+import RemoteData exposing (RemoteData)
 import Result.Extra
 import Validate exposing (Valid, Validator)
 
@@ -177,7 +178,16 @@ updateVendor field vendor =
             { vendor | productName = name }
 
         ProductPrice price ->
-            { vendor | productPrice = price |> String.toFloat |> Result.fromMaybe price }
+            { vendor
+                | productPrice =
+                    -- NOTE this is a special case 'cause `String.toFloat "123." == Just 123`
+                    -- without that particular test it would be impossible to input floating number
+                    if String.endsWith "." price then
+                        Err price
+
+                    else
+                        price |> String.toFloat |> Result.fromMaybe price
+            }
 
         ProductQuantity qte ->
             { vendor | productQuantity = qte |> String.toInt |> Result.fromMaybe qte }
@@ -243,8 +253,13 @@ isProductQuantity field =
 
 type alias Model =
     { userForm : User
-    , request : WebData ()
+    , request : RemoteData Error ()
     }
+
+
+type Error
+    = ValidationError
+    | HttpError Http.Error
 
 
 defaultModel : UserType -> Model
@@ -270,20 +285,17 @@ init _ =
 
 
 type Msg
-    = NoOp
-    | SetUserType UserType
+    = SetUserType UserType
     | SetCustomerField CustomerField
     | SetVendorField VendorField
-    | Submit (Valid User)
-    | UserCreationUpdate (WebData ())
+    | SubmitCustomer (Valid Customer)
+    | SubmitVendor (Valid Vendor)
+    | UserCreationUpdate (RemoteData Error ())
 
 
 update : Msg -> Model -> ( Model, Cmd Msg )
 update msg model =
     case msg of
-        NoOp ->
-            ( model, Cmd.none )
-
         SetUserType userType ->
             ( defaultModel userType, Cmd.none )
 
@@ -292,7 +304,12 @@ update msg model =
                 Customer_ customer ->
                     ( { model
                         | userForm = Customer_ <| updateCustomer customerField customer
-                        , request = RemoteData.NotAsked
+                        , request =
+                            if model.request == RemoteData.Failure ValidationError then
+                                RemoteData.Failure ValidationError
+
+                            else
+                                RemoteData.NotAsked
                       }
                     , Cmd.none
                     )
@@ -306,7 +323,12 @@ update msg model =
                 Vendor_ vendor ->
                     ( { model
                         | userForm = Vendor_ <| updateVendor vendorField vendor
-                        , request = RemoteData.NotAsked
+                        , request =
+                            if model.request == RemoteData.Failure ValidationError then
+                                RemoteData.Failure ValidationError
+
+                            else
+                                RemoteData.NotAsked
                       }
                     , Cmd.none
                     )
@@ -315,7 +337,10 @@ update msg model =
                     -- NOTE this should never happen by construction
                     ( model, Cmd.none )
 
-        Submit _ ->
+        SubmitCustomer _ ->
+            Debug.todo "handle submit"
+
+        SubmitVendor _ ->
             Debug.todo "handle submit"
 
         UserCreationUpdate newRequest ->
@@ -328,7 +353,7 @@ subscriptions _ =
 
 
 view : Model -> Browser.Document Msg
-view { userForm } =
+view { userForm, request } =
     { title = "Registration"
     , body =
         [ div [ class "flex flex-col items-center justify-center w-full max-w-4xl m-auto text-2xl min-h-screen-6xl space-y-4" ]
@@ -356,26 +381,46 @@ view { userForm } =
                     [ text "Vendor"
                     ]
                 ]
-            , form [ class "flex flex-col w-full p-4 space-y-8" ]
+            , let
+                ( submitFormAction, submitStyle ) =
+                    case userForm of
+                        Customer_ customer ->
+                            Validate.validate customerValidator customer
+                                |> Result.Extra.unwrap ( UserCreationUpdate <| RemoteData.Failure ValidationError, PrimaryDisabled )
+                                    (\validCustomer -> ( SubmitCustomer validCustomer, Primary ))
+
+                        Vendor_ vendor ->
+                            Validate.validate vendorValidator vendor
+                                |> Result.Extra.unwrap ( UserCreationUpdate <| RemoteData.Failure ValidationError, PrimaryDisabled )
+                                    (\validVendor -> ( SubmitVendor validVendor, Primary ))
+              in
+              form
+                [ class "flex flex-col w-full p-4 space-y-8"
+                , onSubmit submitFormAction
+                ]
                 [ case userForm of
                     Customer_ customer ->
-                        customerForm customer
+                        customerForm request customer
 
                     Vendor_ vendor ->
-                        vendorform vendor
-                , div [ class "flex flex-row justify-end" ] [ button { msg = Nothing, style = Primary } [ text "Submit" ] ]
+                        vendorform request vendor
+                , div [ class "flex flex-row justify-end" ] [ button { msg = Just submitFormAction, style = submitStyle } [ text "Submit" ] ]
                 ]
             ]
         ]
     }
 
 
-customerForm : Customer -> Html Msg
-customerForm ({ email, firstName, lastName } as customer) =
+customerForm : RemoteData Error () -> Customer -> Html Msg
+customerForm request ({ email, firstName, lastName } as customer) =
     let
         errors =
-            Validate.validate customerValidator customer
-                |> Result.Extra.error
+            if request == RemoteData.Failure ValidationError then
+                Validate.validate customerValidator customer
+                    |> Result.Extra.error
+
+            else
+                Nothing
 
         feedbackForField test =
             errors
@@ -410,12 +455,16 @@ customerForm ({ email, firstName, lastName } as customer) =
         ]
 
 
-vendorform : Vendor -> Html Msg
-vendorform ({ email, companyName, productName, productPrice, productQuantity } as vendor) =
+vendorform : RemoteData Error () -> Vendor -> Html Msg
+vendorform request ({ email, companyName, productName, productPrice, productQuantity } as vendor) =
     let
         errors =
-            Validate.validate vendorValidator vendor
-                |> Result.Extra.error
+            if request == RemoteData.Failure ValidationError then
+                Validate.validate vendorValidator vendor
+                    |> Result.Extra.error
+
+            else
+                Nothing
 
         feedbackForField test =
             errors
@@ -461,36 +510,28 @@ vendorform ({ email, companyName, productName, productPrice, productQuantity } a
 
 type BtnStyle
     = Primary
+    | PrimaryDisabled
     | Secondary
 
 
 button : { msg : Maybe Msg, style : BtnStyle } -> List (Html Msg) -> Html Msg
 button { msg, style } =
     Html.button
-        (class "p-4 border-2 border-blue-900 rounded-sm"
-            :: Maybe.Extra.unwrap
-                -- if there is no msg then this btn is disabled
-                [ class "text-gray-600 border-gray-600 cursor-not-allowed pointer-events-none"
-                , case style of
-                    Primary ->
-                        class "bg-gray-200"
+        [ class "p-4 border-2 border-blue-900 rounded-sm"
+        , case style of
+            Primary ->
+                class "text-white bg-blue-900"
 
-                    Secondary ->
-                        Html.Attributes.Extra.empty
-                ]
-                (onClick
-                    >> List.singleton
-                    >> (::)
-                        (case style of
-                            Primary ->
-                                class "text-white bg-blue-900"
+            PrimaryDisabled ->
+                class "text-white bg-blue-200"
 
-                            Secondary ->
-                                Html.Attributes.Extra.empty
-                        )
-                )
-                msg
-        )
+            Secondary ->
+                Html.Attributes.Extra.empty
+        , Maybe.Extra.unwrap
+            Html.Attributes.Extra.empty
+            onClick
+            msg
+        ]
 
 
 input : { label : String, feedback : Maybe String, value : String, onChange : String -> Msg } -> Html Msg
