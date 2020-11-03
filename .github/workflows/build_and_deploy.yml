@@ -16,13 +16,13 @@ jobs:
       - name: Build the example
         run: |
           npm i
-          npm run css:build
+          NODE_END=production npm run css:build
           npm run build
 
       - name: GitHub Pages action
         uses: peaceiris/actions-gh-pages@v3.7.3
         with:
           github_token: ${{ secrets.ACCESS_TOKEN }}
-          publish_dir: ./example/dist
+          publish_dir: ./dist
 
 
